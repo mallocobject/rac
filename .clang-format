@@ -1,0 +1,10 @@
+Language:  Cpp
+BasedOnStyle: MicroSoft
+IndentWidth: 4
+UseTab: true
+BreakBeforeBraces: Allman
+AllowShortIfStatementsOnASingleLine: false
+ColumnLimit: 80
+SpacesBeforeTrailingComments: 1
+IndentCaseLabels: false
+PointerBindsToType: true
