@@ -9,7 +9,7 @@ using namespace std::chrono_literals;
 
 Task<> task1()
 {
-	co_await sleep(3s);
+	co_await sleep(1s);
 	LOG_INFO << "hello";
 	co_return;
 }
@@ -20,7 +20,13 @@ Task<> task2()
 	LOG_INFO << "world";
 }
 
+Task<> task3()
+{
+	co_await when_any(sleep(4s), when_any(sleep(3s), task2()));
+	LOG_INFO << "hello world";
+}
+
 int main()
 {
-	async_main(task2());
+	async_main(task3());
 }

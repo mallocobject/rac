@@ -15,9 +15,27 @@ struct WhenAnyCtrlBlock
 {
 	static constexpr std::size_t npos = static_cast<std::size_t>(-1);
 
-	std::atomic_size_t winner{npos};
+	std::size_t winner{npos};
 	CoroHandle* waiter{nullptr};
 	std::exception_ptr exception{nullptr};
+
+	bool try_complete(std::size_t index, std::exception_ptr ep)
+	{
+		if (winner != npos)
+		{
+			return false;
+		}
+		winner = index;
+		exception = ep;
+
+		auto* w = waiter;
+		waiter = nullptr;
+		if (w)
+		{
+			w->schedule();
+		}
+		return true;
+	}
 };
 
 struct WhenAnyAwaiter
@@ -33,9 +51,11 @@ struct WhenAnyAwaiter
 	template <Promise P>
 	bool await_suspend(std::coroutine_handle<P> coro) const noexcept
 	{
+		coro.promise().setState(Handle::State::kSuspend);
 		ctrl.waiter = &coro.promise();
 		for (auto const& t : tasks)
 		{
+
 			t.coro_.promise().schedule();
 		}
 		return true;
@@ -54,19 +74,6 @@ template <Awaitable A, typename T>
 Task<> whenAnyHelper(A&& t, WhenAnyCtrlBlock& ctrl, Result<T>& result,
 					 std::size_t index)
 {
-	auto try_win_and_wake = [&](std::exception_ptr ep)
-	{
-		std::size_t expected = WhenAnyCtrlBlock::npos;
-		if (ctrl.winner.compare_exchange_strong(expected, index,
-												std::memory_order_acq_rel))
-		{
-			ctrl.exception = ep; // ep == nullptr 表示正常完成
-			if (ctrl.waiter)
-			{
-				ctrl.waiter->schedule();
-			}
-		}
-	};
 	try
 	{
 		if constexpr (std::is_void_v<T>)
@@ -77,11 +84,11 @@ Task<> whenAnyHelper(A&& t, WhenAnyCtrlBlock& ctrl, Result<T>& result,
 		{
 			result.return_value(co_await std::forward<A>(t));
 		}
-		try_win_and_wake(nullptr);
+		ctrl.try_complete(index, nullptr);
 	}
 	catch (...)
 	{
-		try_win_and_wake(std::current_exception());
+		ctrl.try_complete(index, std::current_exception());
 	}
 	co_return;
 }
