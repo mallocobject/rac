@@ -25,31 +25,41 @@ Task<int> hello()
 	co_return a;
 }
 
-Task<> sleep1()
+Task<int> sleep1()
 {
 	co_await sleep(2s);
 	LOG_INFO << "sleep1苏醒";
+	co_return 1;
 }
 
-Task<> sleep2()
+Task<int> sleep2()
 {
 	co_await sleep(5s);
 	LOG_INFO << "sleep2苏醒";
+	co_return 2;
 }
 
-Task<> sleep_()
+Task<int> sleep_()
 {
+	LOG_INFO << "添加定时器1";
 	auto t2 = co_spawn(sleep2()); // 5s
+	LOG_INFO << "添加定时器2";
 	auto t1 = co_spawn(sleep1()); // 2s
 
-	co_await t2;
-	co_await t1;
+	LOG_INFO << "等待定时器1";
+	int ret = 0;
+	ret += co_await t1; // 不挂起当函数协程执行完，析构对象的同时会cancel handle
+	LOG_INFO << "等待定时器2";
+
+	t2.cancel();
+
+	co_return ret;
 }
 
 int main()
 {
 	auto start = std::chrono::steady_clock::now();
-	async_main(sleep_());
+	LOG_WARN << async_main(sleep_());
 
 	LOG_INFO << std::chrono::duration_cast<std::chrono::seconds>(
 					std::chrono::steady_clock::now() - start)

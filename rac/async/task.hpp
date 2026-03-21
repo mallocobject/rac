@@ -1,6 +1,8 @@
 #ifndef RAC_ASYNC_TASK_HPP
 #define RAC_ASYNC_TASK_HPP
 
+#include "elog/logger.h"
+#include "rac/async/concepts.hpp"
 #include "rac/async/coro_handle.hpp"
 #include "rac/async/event_loop.hpp"
 #include "rac/async/handle.hpp"
@@ -49,7 +51,7 @@ template <typename T = void> struct Task
 		return std::move(coro_.promise()).result();
 	}
 
-	struct Awaiter
+	struct AwaiterBase
 	{
 
 		bool await_ready() const noexcept
@@ -71,51 +73,75 @@ template <typename T = void> struct Task
 			callee_coro.promise().schedule();
 		}
 
-		T await_resume() const
-		{
-			if (!callee_coro) [[unlikely]]
-			{
-				throw std::runtime_error("future is invalid");
-			}
+		// explicit AwaiterBase(std::coroutine_handle<promise_type> callee_coro)
+		// 	: callee_coro(callee_coro)
+		// {
+		// }
 
-			if constexpr (std::is_void_v<T>)
-			{
-				callee_coro.promise().result();
-				return;
-			}
-			else
-			{
-				return callee_coro.promise().result();
-			}
-		}
-
-		explicit Awaiter(std::coroutine_handle<promise_type> callee_coro)
-			: callee_coro(callee_coro)
-		{
-		}
-
-		coro_handle callee_coro;
+		coro_handle callee_coro{};
 	};
 
-	struct OwnedAwaiter : public Awaiter
-	{
-		using Awaiter::Awaiter;
+	// struct OwnedAwaiter : public Awaiter
+	// {
+	// 	using Awaiter::Awaiter;
 
-		~OwnedAwaiter()
-		{
-			assert(Awaiter::callee_coro);
-			Awaiter::callee_coro.destroy();
-		}
-	};
+	// 	~OwnedAwaiter()
+	// 	{
+	// 		std::cerr << "OwnedAwaiter destroy callee\n";
+	// 		assert(Awaiter::callee_coro);
+	// 		// Awaiter::callee_coro.destroy();
+	// 	}
+	// };
 
 	auto operator co_await() const& noexcept
 	{
+		struct Awaiter : public AwaiterBase
+		{
+			decltype(auto) await_resume() const
+			{
+				if (!AwaiterBase::callee_coro) [[unlikely]]
+				{
+					throw std::runtime_error("future is invalid");
+				}
+
+				if constexpr (std::is_void_v<T>)
+				{
+					AwaiterBase::callee_coro.promise().result();
+					return;
+				}
+				else
+				{
+					return AwaiterBase::callee_coro.promise().result();
+				}
+			}
+		};
 		return Awaiter{coro_};
 	}
 
 	auto operator co_await() && noexcept
 	{
-		return OwnedAwaiter{std::exchange(coro_, nullptr)};
+		struct Awaiter : public AwaiterBase
+		{
+			decltype(auto) await_resume() const
+			{
+				if (!AwaiterBase::callee_coro) [[unlikely]]
+				{
+					throw std::runtime_error("future is invalid");
+				}
+
+				if constexpr (std::is_void_v<T>)
+				{
+					std::move(AwaiterBase::callee_coro.promise()).result();
+					return;
+				}
+				else
+				{
+					return std::move(AwaiterBase::callee_coro.promise())
+						.result();
+				}
+			}
+		};
+		return Awaiter{coro_};
 	}
 
 	bool valid() const

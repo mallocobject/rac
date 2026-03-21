@@ -1,6 +1,7 @@
 #ifndef RAC_ASYNC_EVENT_LOOP_HPP
 #define RAC_ASYNC_EVENT_LOOP_HPP
 
+#include "elog/logger.h"
 #include "rac/async/concepts.hpp"
 #include "rac/async/epoll_poller.hpp"
 #include "rac/async/event.hpp"
@@ -194,6 +195,8 @@ inline void EventLoop::runOnce()
 			info.handle->run();
 		}
 	}
+
+	cleanupDelayedCall();
 }
 } // namespace rac
 

@@ -1,6 +1,7 @@
 #ifndef RAC_ASYNC_SCHEDULED_TASK_HPP
 #define RAC_ASYNC_SCHEDULED_TASK_HPP
 
+#include "elog/logger.h"
 #include "rac/async/concepts.hpp"
 #include <utility>
 namespace rac
@@ -19,10 +20,6 @@ template <Future TaskT> struct ScheduledTask
 	ScheduledTask(ScheduledTask&& other) noexcept
 		: task_(std::move(other.task_))
 	{
-		if (task_.valid() && !task_.done())
-		{
-			task_.coro_.promise().schedule();
-		}
 	}
 
 	~ScheduledTask() = default;

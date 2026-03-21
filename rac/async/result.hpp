@@ -1,6 +1,7 @@
 #ifndef RAC_ASYNC_RESULT_HPP
 #define RAC_ASYNC_RESULT_HPP
 
+#include "elog/logger.h"
 #include "rac/async/non_void_helper.hpp"
 #include <exception>
 #include <memory>
@@ -11,6 +12,7 @@ template <typename T = void> struct Result
 	template <typename... Args> void return_value(Args... args)
 	{
 		new (std::addressof(val)) T(std::forward<Args>(args)...);
+		has_value = true;
 	}
 
 	void unhandled_exception() noexcept
@@ -35,6 +37,7 @@ template <typename T = void> struct Result
 		}
 		T ret = std::move(val);
 		val.~T();
+		has_value = false;
 		return ret;
 	}
 
@@ -44,8 +47,12 @@ template <typename T = void> struct Result
 
 	Result(Result&&) = delete;
 
-	~Result() noexcept
+	~Result()
 	{
+		if (has_value)
+		{
+			val.~T();
+		}
 	}
 
 	union
@@ -53,6 +60,7 @@ template <typename T = void> struct Result
 		T val;
 	};
 	std::exception_ptr exception;
+	bool has_value{false};
 };
 
 template <> struct Result<void>
