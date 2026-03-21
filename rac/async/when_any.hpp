@@ -55,7 +55,6 @@ struct WhenAnyAwaiter
 		ctrl.waiter = &coro.promise();
 		for (auto const& t : tasks)
 		{
-
 			t.coro_.promise().schedule();
 		}
 		return true;

@@ -25,6 +25,7 @@ template <typename T = void> struct Task
 
 	template <Future> friend struct ScheduledTask;
 	friend struct WhenAnyAwaiter;
+	friend struct WhenAllAwaiter;
 
 	explicit Task(coro_handle coro) noexcept : coro_(coro)
 	{
