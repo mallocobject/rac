@@ -96,7 +96,7 @@ class Stream
 		}
 	}
 
-	Task<> write(const std::string& str = std::string())
+	Task<bool> write(const std::string& str = std::string())
 	{
 		write_buf_.append(str);
 		while (write_buf_.readableBytes() > 0)
@@ -112,12 +112,12 @@ class Stream
 				int err = checkErrorNonBlock<EPIPE, ECONNRESET>(n);
 				if (err == EPIPE || err == ECONNRESET)
 				{
-					co_return;
+					co_return false;
 				}
 				co_await write_awaiter_;
 			}
 		}
-		co_return;
+		co_return true;
 	}
 
 	const InetAddr& sock_addr() const
@@ -135,6 +135,12 @@ class Stream
 		return &write_buf_;
 	}
 
+	int fd() const noexcept
+	{
+		assert(read_fd_ == write_fd_);
+		return read_fd_;
+	}
+
   private:
 	int read_fd_{-1};
 	int write_fd_{-1};
@@ -148,6 +154,7 @@ class Stream
 		EventLoop::loop().wait_event(write_ev_)};
 	InetAddr sock_addr_{};
 };
+
 } // namespace rac
 
 #endif
