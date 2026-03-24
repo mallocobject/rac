@@ -1,6 +1,7 @@
 #include "elog/logger.h"
 #include "rac/async/async_main.hpp"
 #include "rac/async/task.hpp"
+#include "rac/async/when_all.hpp"
 #include "rac/rpc/client.hpp"
 #include <thread>
 
@@ -29,15 +30,12 @@ Task<> connect_server(RpcClient& client)
 	{
 		while (true)
 		{
-			auto res = co_await client.call<Point>("AddPoint", Point{1, 2},
-												   Point{5.2, 6.8});
-			std::cout << "x: " << res.x << std::endl;
-			std::cout << "y: " << res.y << std::endl;
+			auto [pt, usr] = co_await when_all(
+				client.call<Point>("AddPoint", Point{1, 2}, Point{5.2, 6.8}),
+				client.call<User>("EchoUser", User{8, "liuna", {1, 5}}));
 
-			std::this_thread::sleep_for(1s);
-
-			auto usr = co_await client.call<User>("EchoUser",
-												  User{8, "liuna", {1, 5}});
+			std::cout << "x: " << pt.x << std::endl;
+			std::cout << "y: " << pt.y << std::endl;
 
 			std::cout << "ID: " << usr.id << "\n";
 			std::cout << "Name: " << usr.name << "\n";

@@ -93,15 +93,22 @@ inline Task<> RpcServer::handleClient(int conn_fd)
 		}
 
 		s.read_buffer()->retrieve(h.header_len);
+		std::size_t readable_before = s.read_buffer()->readableBytes();
+
 		std::string method_name;
 		DeserializeTraits<std::string>::deserialize(s.read_buffer(),
 													&method_name);
 
 		LOG_DEBUG << "Client requesting method: " << method_name;
 
+		std::size_t consumed =
+			readable_before - s.read_buffer()->readableBytes();
+		std::uint32_t args_limit = h.body_len - consumed;
+
 		std::size_t size_before = s.write_buffer()->readableBytes();
 
-		dispatcher_.dispatch(method_name, s.read_buffer(), s.write_buffer());
+		dispatcher_.dispatch(method_name, s.read_buffer(), s.write_buffer(),
+							 args_limit);
 
 		h.body_len = static_cast<uint32_t>(s.write_buffer()->readableBytes() -
 										   size_before);

@@ -21,6 +21,7 @@ struct WhenAnyCtrlBlock
 
 	bool try_complete(std::size_t index, std::exception_ptr ep)
 	{
+		// when winner has changed
 		if (winner != npos)
 		{
 			return false;

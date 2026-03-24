@@ -22,10 +22,15 @@ struct WhenAllCtrlBlock
 	bool try_complete(std::exception_ptr ep)
 	{
 		count--;
-		if (ep || count)
+		if (!ep && count)
+		{
+			return false;
+		}
+
+		// record the first exception
+		if (ep && !exception)
 		{
 			exception = ep;
-			return false;
 		}
 
 		auto* w = waiter;
@@ -100,7 +105,6 @@ Task<std::tuple<typename AwaitableTraits<Ts>::NonVoidRetType...>> whenAllImpl(
 	std::tuple<Result<typename AwaitableTraits<Ts>::RetType>...> results;
 	Task<> helpers[]{whenAllHelper(ts, ctrl, std::get<Is>(results))...};
 	co_await WhenAllAwaiter{ctrl, helpers};
-
 	co_return std::tuple<typename AwaitableTraits<Ts>::NonVoidRetType...>{
 		std::get<Is>(results).result()...};
 }

@@ -5,12 +5,14 @@
 #include "rac/async/check_error.hpp"
 #include "rac/async/scheduled_task.hpp"
 #include "rac/async/task.hpp"
+#include "rac/net/buffer.hpp"
 #include "rac/net/inet_addr.hpp"
 #include "rac/net/socket.hpp"
 #include "rac/net/stream.hpp"
 #include "rac/rpc/serialize_traits.hpp"
 #include <atomic>
 #include <cstdint>
+#include <queue>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -54,6 +56,27 @@ class RpcClient
 		}
 	};
 
+	struct WriterWaitAwaiter
+	{
+		RpcClient* client;
+
+		bool await_ready() const noexcept
+		{
+			return !client->write_queue_.empty();
+		}
+
+		template <typename P>
+		void await_suspend(std::coroutine_handle<P> coro) noexcept
+		{
+			coro.promise().setState(Handle::State::kSuspend);
+			client->writer_waiter_ = &coro.promise();
+		}
+
+		void await_resume() const noexcept
+		{
+		}
+	};
+
   public:
 	explicit RpcClient(const InetAddr& sock_addr)
 		: stream_(checkError(Socket::socket(nullptr)), sock_addr)
@@ -64,6 +87,7 @@ class RpcClient
 
 		// background_reader_ = co_spawn(readLoop());
 		static ScheduledTask<Task<>> background_reader(co_spawn(readLoop()));
+		static ScheduledTask<Task<>> background_writer(co_spawn(writeLoop()));
 	}
 
 	explicit RpcClient(const std::string& ip, std::uint16_t port)
@@ -83,12 +107,16 @@ class RpcClient
 
   private:
 	Task<> readLoop();
+	Task<> writeLoop();
 
   private:
 	Stream stream_;
 	std::atomic<std::uint64_t> next_request_id_{1};
 	std::unordered_map<std::uint64_t, CallContext*> pending_calls_;
 	// ScheduledTask<Task<>> background_reader_;
+
+	std::queue<Buffer> write_queue_;
+	CoroHandle* writer_waiter_{nullptr};
 };
 
 template <typename Ret, typename... Args>
@@ -96,30 +124,29 @@ Task<Ret> RpcClient::call(const std::string& method_name, Args&&... args)
 {
 	uint64_t req_id = next_request_id_.fetch_add(1, std::memory_order_acq_rel);
 
-	std::size_t size_before = stream_.write_buffer()->readableBytes();
-	SerializeTraits<std::string>::serialize(stream_.write_buffer(),
-											method_name);
+	Buffer req_buf;
+	std::size_t size_before = req_buf.readableBytes();
+	SerializeTraits<std::string>::serialize(&req_buf, method_name);
 	using ArgsType = std::tuple<std::remove_cvref_t<Args>...>;
 	ArgsType args_tuple{std::forward<Args>(args)...};
-	SerializeTraits<ArgsType>::serialize(stream_.write_buffer(), args_tuple);
+	SerializeTraits<ArgsType>::serialize(&req_buf, args_tuple);
 
 	RpcHeader h{.magic = kMagic,
 				.version = kVersion,
 				.flags = 1,
 				.header_len = kRpcHeaderWireLength,
-				.body_len = static_cast<std::uint32_t>(
-					stream_.write_buffer()->readableBytes() - size_before),
+				.body_len = static_cast<std::uint32_t>(req_buf.readableBytes() -
+													   size_before),
 				.request_id = req_id,
 				.reserved = 0};
-	stream_.write_buffer()->prependRpcHeader(h);
+	req_buf.prependRpcHeader(h);
 
-	bool write_success = co_await stream_.write();
-	if (!write_success)
+	write_queue_.push(std::move(req_buf));
+
+	if (writer_waiter_)
 	{
-		LOG_ERROR << "Failed to write to server on fd " << stream_.fd()
-				  << ", connection might be dead. Method: " << method_name;
-		throw std::runtime_error(
-			"Failed to write to server, connection might be dead.");
+		writer_waiter_->schedule();
+		writer_waiter_ = nullptr;
 	}
 
 	CallContext ctx;
@@ -192,6 +219,50 @@ inline Task<> RpcClient::readLoop()
 	{
 		LOG_ERROR << e.what();
 
+		for (auto& [id, ctx] : pending_calls_)
+		{
+			ctx->exception = std::current_exception();
+			if (ctx->coro_to_resume)
+			{
+				ctx->coro_to_resume->schedule();
+			}
+		}
+		pending_calls_.clear();
+	}
+}
+
+inline Task<> RpcClient::writeLoop()
+{
+	try
+	{
+		while (true)
+		{
+			// 如果队列为空，把自己挂起，直到 call() 里把它唤醒
+			if (write_queue_.empty())
+			{
+				co_await WriterWaitAwaiter{this};
+			}
+
+			while (!write_queue_.empty())
+			{
+				Buffer buf = std::move(write_queue_.front());
+				write_queue_.pop();
+
+				stream_.write_buffer()->append(buf.peek(), buf.readableBytes());
+
+				bool write_success = co_await stream_.write();
+				if (!write_success)
+				{
+					throw std::runtime_error(
+						"Server closed connection while writing.");
+				}
+			}
+		}
+	}
+	catch (const std::exception& e)
+	{
+		LOG_ERROR << "writeLoop exit: " << e.what();
+		// 写协程挂了，也应该通知所有正在等待的调用
 		for (auto& [id, ctx] : pending_calls_)
 		{
 			ctx->exception = std::current_exception();
