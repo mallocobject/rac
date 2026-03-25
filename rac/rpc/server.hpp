@@ -3,10 +3,8 @@
 
 #include "rac/async/async_main.hpp"
 #include "rac/async/check_error.hpp"
-#include "rac/async/epoll_poller.hpp"
 #include "rac/async/event.hpp"
 #include "rac/async/event_loop.hpp"
-#include "rac/async/scheduled_task.hpp"
 #include "rac/async/task.hpp"
 #include "rac/net/inet_addr.hpp"
 #include "rac/net/scheduler.hpp"
@@ -16,8 +14,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <latch>
-#include <list>
-#include <mutex>
 #include <thread>
 #include <utility>
 #include <vector>

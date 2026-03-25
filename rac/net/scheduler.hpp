@@ -2,16 +2,15 @@
 #define RAC_NET_SCHEDULER_HPP
 
 #include "elog/logger.h"
-#include "rac/async/async_main.hpp"
 #include "rac/async/check_error.hpp"
 #include "rac/async/event_loop.hpp"
 #include "rac/async/scheduled_task.hpp"
 #include "rac/async/task.hpp"
 #include "rac/meta/lock_free_queue.hpp"
 #include <latch>
+#include <list>
 #include <sys/eventfd.h>
 #include <utility>
-#include <vector>
 namespace rac
 {
 class Scheduler
@@ -38,8 +37,25 @@ class Scheduler
 			Task<> tmp(nullptr);
 			while (task_queue_.pop(tmp))
 			{
-				// FIXME
 				sts_.emplace_back(std::move(tmp));
+			}
+
+			// FIXME
+			if (sts_.size() < 100) [[likely]]
+			{
+				continue;
+			}
+			for (auto iter = sts_.begin(); iter != sts_.end();)
+			{
+				if (iter->done())
+				{
+					iter->result(); //< consume result, such as throw exception
+					iter = sts_.erase(iter);
+				}
+				else
+				{
+					++iter;
+				}
 			}
 		}
 	}
@@ -69,7 +85,7 @@ class Scheduler
 
   private:
 	LockFreeQueue<Task<>> task_queue_;
-	std::vector<ScheduledTask<Task<>>> sts_;
+	std::list<ScheduledTask<Task<>>> sts_;
 
 	int wakeup_fd{checkError(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK))};
 	Event wakeup_ev_{.fd = wakeup_fd, .flags = Event::kEventRead};
