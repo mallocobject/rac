@@ -9,6 +9,7 @@
 #include "rac/async/scheduled_task.hpp"
 #include "rac/async/task.hpp"
 #include "rac/net/inet_addr.hpp"
+#include "rac/net/scheduler.hpp"
 #include "rac/net/socket.hpp"
 #include "rac/net/stream.hpp"
 #include "rac/rpc/dispatcher.hpp"
@@ -60,19 +61,15 @@ class RpcServer
 
 	void start()
 	{
-		epfds_.reserve(loop_count_);
 		std::latch start_latch{static_cast<std::ptrdiff_t>(loop_count_)};
 		for (size_t idx = 0; idx < loop_count_; idx++)
 		{
 			loops_.emplace_back(
 				[this, &start_latch]
 				{
-					{
-						std::lock_guard<std::mutex> lock(mtx_);
-						epfds_.push_back(EventLoop::loop().epfd());
-					}
-					start_latch.count_down();
-					EventLoop::loop().run_until_complete();
+					Scheduler scheduler{};
+					schedulers_ptr_.push_back(&scheduler);
+					async_main(scheduler.schedulerLoop(start_latch));
 				});
 		}
 		start_latch.wait();
@@ -92,9 +89,9 @@ class RpcServer
 	Stream stream_;
 	RpcDispatcher dispatcher_{};
 	std::size_t loop_count_{0};
+
+	std::vector<Scheduler*> schedulers_ptr_;
 	std::vector<std::jthread> loops_;
-	std::mutex mtx_;
-	std::vector<int> epfds_;
 };
 
 inline Task<> RpcServer::handleClient(int conn_fd)
@@ -137,7 +134,7 @@ inline Task<> RpcServer::handleClient(int conn_fd)
 		DeserializeTraits<std::string>::deserialize(s.read_buffer(),
 													&method_name);
 
-		LOG_DEBUG << "Client requesting method: " << method_name;
+		// LOG_DEBUG << "Client requesting method: " << method_name;
 
 		std::size_t consumed =
 			readable_before - s.read_buffer()->readableBytes();
@@ -178,14 +175,18 @@ inline Task<> RpcServer::serverLoop()
 			int opt = 1;
 			setsockopt(conn_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
-			int epfd = epfds_[lucky_boy++ % epfds_.size()];
+			auto lucky = schedulers_ptr_[lucky_boy++ % schedulers_ptr_.size()];
+			lucky->push(handleClient(conn_fd));
+			lucky->wakeup();
 
-			auto* info = new HandleInfo{.boostrap_fd = conn_fd};
+			// int epfd = epfds_[lucky_boy++ % epfds_.size()];
 
-			epoll_event ev{.events = EPOLLIN | EPOLLONESHOT,
-						   .data{.ptr = info}};
+			// auto* info = new HandleInfo{.boostrap_fd = conn_fd};
 
-			checkError(epoll_ctl(epfd, EPOLL_CTL_ADD, conn_fd, &ev));
+			// epoll_event ev{.events = EPOLLIN | EPOLLONESHOT,
+			// 			   .data{.ptr = info}};
+
+			// checkError(epoll_ctl(epfd, EPOLL_CTL_ADD, conn_fd, &ev));
 			// connections.emplace_back(handleClient(conn_fd));
 		}
 

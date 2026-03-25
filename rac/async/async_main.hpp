@@ -9,7 +9,7 @@ namespace rac
 {
 template <Future Fut> decltype(auto) async_main(Fut&& main)
 {
-	auto task = ScheduledTask{std::forward<Fut>(main)};
+	auto task = ScheduledTask(std::move(main));
 	EventLoop::loop().run_until_complete();
 	return task.result();
 }

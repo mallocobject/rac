@@ -2,13 +2,30 @@
 #define RAC_ASYNC_SCHEDULED_TASK_HPP
 
 #include "rac/async/concepts.hpp"
+#include "rac/meta/intrusive_list.hpp"
 #include <utility>
 namespace rac
 {
-template <Future TaskT> struct ScheduledTask
+template <Future TaskT>
+struct ScheduledTask : public Intrusive_list<ScheduledTask<TaskT>>::Node
 {
-	template <Future Fut>
-	explicit ScheduledTask(Fut&& fut) noexcept : task_(std::forward<Fut>(fut))
+	// template <Future Fut>
+	// explicit ScheduledTask(Fut&& fut) noexcept :
+	// task_(std::forward<Fut>(fut))
+	// {
+	// 	if (task_.valid() && !task_.done())
+	// 	{
+	// 		task_.coro_.promise().schedule();
+	// 	}
+	// }
+
+	// explicit ScheduledTask(const TaskT& fut) noexcept : task_(fut)
+	// {
+	// 	if (task_.valid() && !task_.done())
+	// 		task_.coro_.promise().schedule();
+	// }
+
+	explicit ScheduledTask(TaskT&& fut) noexcept : task_(std::move(fut))
 	{
 		if (task_.valid() && !task_.done())
 		{
@@ -75,14 +92,14 @@ template <Future TaskT> struct ScheduledTask
 	TaskT task_;
 };
 
-template <Future Fut> ScheduledTask(Fut&&) -> ScheduledTask<Fut>;
+// template <Future Fut> ScheduledTask(Fut&&) -> ScheduledTask<Fut>;
 
 template <Future Fut>
 [[nodiscard(
 	"discard(detached) a task will not schedule to run")]] ScheduledTask<Fut>
 co_spawn(Fut&& fut) // 内部无 await，需要 co_await 延长生命周期
 {
-	return ScheduledTask{std::forward<Fut>(fut)};
+	return ScheduledTask<Fut>(std::move(fut));
 }
 } // namespace rac
 

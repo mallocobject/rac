@@ -65,16 +65,7 @@ struct EpollPoller
 		for (int i = 0; i < nevs; i++)
 		{
 			auto handle_info = reinterpret_cast<HandleInfo*>(evs[i].data.ptr);
-			if (handle_info->bootstrap_fd != -1)
-			{
-				int fd = handle_info->bootstrap_fd;
-				delete handle_info; // 释放内存
-
-				epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr);
-
-				co_spawn(handleClient(fd));
-			}
-			else if (handle_info->handle)
+			if (handle_info->handle)
 			{
 				result.emplace_back(*handle_info);
 			}
