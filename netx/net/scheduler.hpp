@@ -7,6 +7,7 @@
 #include "netx/async/scheduled_task.hpp"
 #include "netx/async/task.hpp"
 #include "netx/meta/lock_free_queue.hpp"
+#include <cstddef>
 #include <latch>
 #include <list>
 #include <sys/eventfd.h>
@@ -24,6 +25,11 @@ class Scheduler
 	Scheduler(Scheduler&&) = delete;
 	~Scheduler() = default;
 
+	std::size_t size() const noexcept
+	{
+		return sts_.size();
+	}
+
 	void push(async::Task<>&& task)
 	{
 		task_queue_.push(std::move(task));
@@ -36,31 +42,43 @@ class Scheduler
 		{
 			co_await wakeup_awaiter_;
 			shallow();
-			LOG_DEBUG << "scheduler receives tasks, its address is "
+			LOG_TRACE << "scheduler receives tasks, its address is "
 					  << static_cast<void*>(this);
 			async::Task<> tmp(nullptr);
+			// while (task_queue_.pop(tmp))
+			// {
+			// 	sts_.emplace_back(std::move(tmp));
+			// }
+
 			while (task_queue_.pop(tmp))
 			{
-				sts_.emplace_back(std::move(tmp));
+				sts_.emplace_back();
+				auto it = std::prev(sts_.end());
+
+				*it = async::ScheduledTask<async::Task<>>(std::move(tmp), &sts_,
+														  it);
+
+				// async::co_spawn([st = std::move(*it)]() -> async::Task<>
+				// 				{ co_await st; });
 			}
 
-			// FIXME
-			if (sts_.size() < 100) [[likely]]
-			{
-				continue;
-			}
-			for (auto iter = sts_.begin(); iter != sts_.end();)
-			{
-				if (iter->done())
-				{
-					iter->result(); //< consume result, such as throw exception
-					iter = sts_.erase(iter);
-				}
-				else
-				{
-					++iter;
-				}
-			}
+			// // FIXME
+			// if (sts_.size() < 100) [[likely]]
+			// {
+			// 	continue;
+			// }
+			// for (auto iter = sts_.begin(); iter != sts_.end();)
+			// {
+			// 	if (iter->done())
+			// 	{
+			// 		iter->result(); //< consume result, such as throw exception
+			// 		iter = sts_.erase(iter);
+			// 	}
+			// 	else
+			// 	{
+			// 		++iter;
+			// 	}
+			// }
 		}
 	}
 

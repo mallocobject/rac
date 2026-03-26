@@ -2,7 +2,7 @@
 #define NETX_NET_BUFFER_HPP
 
 #include "netx/meta/buffer_endian_helper.hpp"
-#include "netx/rpc/rpc_header.hpp"
+#include "netx/rpc/header.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>

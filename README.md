@@ -15,7 +15,7 @@
     <img src="https://img.shields.io/badge/status-Developing-green.svg" alt="Developing">
   </p>
 
-  <p align="center"> <b>NETX - High Performance Network Framework</b><br> 一个基于 C++20 无栈协程与 epoll 的超高性能、轻量级网络通信框架。 </p>
+  <p align="center"> <b>NETX - High Performance Network Framework</b></p>
 </div>
 
 ---

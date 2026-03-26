@@ -27,7 +27,6 @@ class Stream
   public:
 	explicit Stream(int fd) : read_fd_(fd), write_fd_(dup(fd))
 	{
-		assert(fd >= 0);
 		// Socket::getSockname(read_fd_, &sock_addr_);
 		Socket::setNonBlocking(read_fd_);
 		Socket::setNonBlocking(write_fd_);
@@ -36,6 +35,7 @@ class Stream
 	Stream(int fd, InetAddr sock_addr)
 		: read_fd_(fd), write_fd_(dup(fd)), sock_addr_(std::move(sock_addr))
 	{
+
 		Socket::setNonBlocking(read_fd_);
 		Socket::setNonBlocking(write_fd_);
 	}
@@ -76,57 +76,19 @@ class Stream
 		read_fd_ = write_fd_ = -1;
 	}
 
-	async::Task<bool> read()
+	void shutdown()
 	{
-		while (true)
+		write_awaiter_.reset();
+		if (write_fd_ > 0)
 		{
-			int saved_errno = 0;
-			ssize_t n = read_buf_.read_fd(read_fd_, &saved_errno);
-
-			if (n > 0)
-			{
-				co_return true;
-			}
-			else if (n == 0)
-			{
-				co_return false;
-			}
-			else
-			{
-				errno = saved_errno;
-				int err = async::checkErrorNonBlock<ECONNRESET>(n);
-				if (err == ECONNRESET)
-				{
-					co_return false; // 连接已死
-				}
-				co_await read_awaiter_;
-			}
+			Socket::shutdown(write_fd_);
 		}
+		write_fd_ = -1;
 	}
 
-	async::Task<bool> write(const std::string& str = std::string())
-	{
-		write_buf_.append(str);
-		while (write_buf_.readableBytes() > 0)
-		{
-			ssize_t n = ::send(write_fd_, write_buf_.peek(),
-							   write_buf_.readableBytes(), MSG_NOSIGNAL);
-			if (n > 0)
-			{
-				write_buf_.retrieve(n);
-			}
-			else if (n < 0)
-			{
-				int err = async::checkErrorNonBlock<EPIPE, ECONNRESET>(n);
-				if (err == EPIPE || err == ECONNRESET)
-				{
-					co_return false;
-				}
-				co_await write_awaiter_;
-			}
-		}
-		co_return true;
-	}
+	async::Task<bool> read();
+
+	async::Task<bool> write(const std::string& str = std::string());
 
 	const InetAddr& sock_addr() const
 	{
@@ -145,7 +107,6 @@ class Stream
 
 	int fd() const noexcept
 	{
-		assert(read_fd_ != write_fd_);
 		return read_fd_;
 	}
 
@@ -162,6 +123,58 @@ class Stream
 		async::EventLoop::loop().wait_event(write_ev_)};
 	InetAddr sock_addr_{};
 };
+
+inline async::Task<bool> Stream::read()
+{
+	while (true)
+	{
+		int saved_errno = 0;
+		ssize_t n = read_buf_.read_fd(read_fd_, &saved_errno);
+
+		if (n > 0)
+		{
+			co_return true;
+		}
+		else if (n == 0)
+		{
+			co_return false;
+		}
+		else
+		{
+			errno = saved_errno;
+			int err = async::checkErrorNonBlock<ECONNRESET>(n);
+			if (err == ECONNRESET)
+			{
+				co_return false; // 连接已死
+			}
+			co_await read_awaiter_;
+		}
+	}
+}
+
+inline async::Task<bool> Stream::write(const std::string& str)
+{
+	write_buf_.append(str);
+	while (write_buf_.readableBytes() > 0)
+	{
+		ssize_t n = ::send(write_fd_, write_buf_.peek(),
+						   write_buf_.readableBytes(), MSG_NOSIGNAL);
+		if (n > 0)
+		{
+			write_buf_.retrieve(n);
+		}
+		else if (n < 0)
+		{
+			int err = async::checkErrorNonBlock<EPIPE, ECONNRESET>(n);
+			if (err == EPIPE || err == ECONNRESET)
+			{
+				co_return false;
+			}
+			co_await write_awaiter_;
+		}
+	}
+	co_return true;
+}
 } // namespace net
 } // namespace netx
 
