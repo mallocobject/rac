@@ -22,6 +22,6 @@ int main()
                 co_await stream->write(res->to_formatted_string());
             })
         .timeout(3s)
-		.loop(8)
+		.loop(1)
 		.start();
 }

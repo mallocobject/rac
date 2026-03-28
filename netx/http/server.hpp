@@ -44,62 +44,74 @@ class HttpServer : public net::Server<HttpServer>
 
 inline async::Task<> HttpServer::handleClient(int conn_fd)
 {
-	net::Stream s{conn_fd};
-	Session session{};
+    net::Stream s{conn_fd};
+    Session session{};
 
-	while (true)
-	{
+    try {
+        while (true)
+        {
+            // s.read() 返回 Task<bool>，true 表示读到了数据，false 表示 EOF（客户端关闭）
+            // async::sleep() 返回 Task<void>
+            auto ret = co_await async::when_any(s.read(), async::sleep(timeout_));
 
-		if (!session.parse(s.read_buffer()))
-		{
-			co_await s.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-			s.close();
-			co_return;
-		}
+            // 索引 0 是 s.read() 的结果 (bool)
+            // 索引 1 是 sleep() 的结果 (NonVoidHelper<void>)
+            if (ret.index() == 1) 
+            {
+                elog::LOG_WARN("Connection timeout on fd: {}", s.fd());
+                co_await s.write("HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n");
+                break; 
+            }
 
-		if (session.completed())
-		{
-			const http::HttpRequest& req = session.req();
-			http::HttpResponse res;
+            bool read_ok = std::get<0>(ret);
+            if (!read_ok) 
+            {
+                break;
+            }
 
-			co_await router_.dispatch(req, &res, &s);
+            while (s.read_buffer()->readableBytes() > 0)
+            {
+                if (!session.parse(s.read_buffer()))
+                {
+                    co_await s.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+                    co_return;
+                }
 
-			std::string conn_header = req.header("connection");
-			if (conn_header == "close" ||
-				(req.version == "HTTP/1.0" && conn_header != "keep-alive"))
-			{
-				s.shutdown();
-				// co_return;
-				continue;
-			}
-			else
-			{
-				session.clear();
-			}
-		}
+                if (session.completed())
+                {
+                    const http::HttpRequest& req = session.req();
+                    http::HttpResponse res;
 
-		// if (!co_await s.read())
-		// {
-		// 	s.close();
-		// 	co_return;
-		// }
+                    co_await router_.dispatch(req, &res, &s);
 
-		auto ret = co_await async::when_any(s.read(), async::sleep(timeout_));
+                    std::string conn_header = req.header("connection");
+                    bool keep_alive = true;
+                    if (conn_header == "close" ||
+                        (req.version == "HTTP/1.0" && conn_header != "keep-alive"))
+                    {
+                        keep_alive = false;
+                    }
 
+                    if (!keep_alive)
+                    {
+                        s.shutdown();
+                        co_return;
+                    }
 
-		if (std::holds_alternative<async::NonVoidHelper<void>>(ret)) 
-		{
-			elog::LOG_WARN("connection time out on fd: {}", s.fd());
-			co_await s.write("HTTP/1.1 408 Request Timeout\r\n\r\n");
-			s.close();
-			co_return;
-		} 
-		else if (std::holds_alternative<bool>(ret) && !std::get<bool>(ret)) 
-		{
-			s.close();
-			co_return;
-		}
-	}
+                    session.clear();
+                }
+                else 
+                {
+                    break; 
+                }
+            }
+        }
+    }
+    catch (const std::exception& e) {
+        elog::LOG_ERROR("Exception in handleClient: {}", e.what());
+    }
+
+    co_return;
 }
 } // namespace http
 } // namespace netx
